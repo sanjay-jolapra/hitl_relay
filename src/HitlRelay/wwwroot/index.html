@@ -131,15 +131,15 @@
 </main>
 
 <script>
-const $ = id => document.getElementById(id);
+const el = id => document.getElementById(id);
 let selected = null;
 
-$('apiKey').value = (() => { try { return localStorage.getItem('hitlApiKey') || ''; } catch { return ''; } })();
-$('apiKey').addEventListener('change', () => { try { localStorage.setItem('hitlApiKey', $('apiKey').value); } catch {} });
+el('apiKey').value = (() => { try { return localStorage.getItem('hitlApiKey') || ''; } catch { return ''; } })();
+el('apiKey').addEventListener('change', () => { try { localStorage.setItem('hitlApiKey', el('apiKey').value); } catch {} });
 
 async function api(method, url, body) {
   const headers = { 'Content-Type': 'application/json' };
-  if ($('apiKey').value) headers['X-Api-Key'] = $('apiKey').value;
+  if (el('apiKey').value) headers['X-Api-Key'] = el('apiKey').value;
   const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
   let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
@@ -153,12 +153,12 @@ const fmt = d => d ? new Date(d.endsWith('Z') ? d : d + 'Z').toLocaleTimeString(
 async function loadList() {
   try {
     const rows = await api('GET', '/demo/requests');
-    $('rows').innerHTML = rows.map(r =>
+    el('rows').innerHTML = rows.map(r =>
       `<tr data-id="${r.id}" class="${r.id === selected ? 'sel' : ''}"><td>${esc(r.channel)}<br><span class="muted">${esc(r.recipient)}</span></td>` +
       `<td><span class="pill ${r.status}">${r.status}</span></td><td>${fmt(r.createdAt)}</td></tr>`).join('');
-    $('empty').hidden = rows.length > 0;
+    el('empty').hidden = rows.length > 0;
     document.querySelectorAll('#rows tr').forEach(tr => tr.onclick = () => select(tr.dataset.id));
-  } catch (e) { $('msg').textContent = e.message; }
+  } catch (e) { el('msg').textContent = e.message; }
 }
 
 async function select(id) {
@@ -172,72 +172,72 @@ async function loadDetail() {
   try {
     const r = await api('GET', `/api/hitl/requests/${selected}`);
     const run = await api('GET', `/demo/runs/${r.workflowRunId}`).catch(() => null);
-    $('detail').hidden = false; $('placeholder').hidden = true;
-    $('dId').textContent = r.id;
-    $('dStatus').textContent = r.status; $('dStatus').className = 'pill ' + r.status;
-    $('dRun').textContent = `${r.workflowRunId} (${r.runStatus ?? '?'})`;
-    $('dRetry').textContent = r.retryCount;
-    $('dExp').textContent = fmt(r.expiresAt);
-    $('dRecipient').textContent = `${r.channel}:${r.recipient}`;
-    $('dPrompt').textContent = r.prompt;
+    el('detail').hidden = false; el('placeholder').hidden = true;
+    el('dId').textContent = r.id;
+    el('dStatus').textContent = r.status; el('dStatus').className = 'pill ' + r.status;
+    el('dRun').textContent = `${r.workflowRunId} (${r.runStatus ?? '?'})`;
+    el('dRetry').textContent = r.retryCount;
+    el('dExp').textContent = fmt(r.expiresAt);
+    el('dRecipient').textContent = `${r.channel}:${r.recipient}`;
+    el('dPrompt').textContent = r.prompt;
 
     const pending = r.status === 'Pending';
-    $('keywordBtns').innerHTML = (r.keywords || []).map(k =>
+    el('keywordBtns').innerHTML = (r.keywords || []).map(k =>
       `<button class="secondary" data-key="${esc(k.key)}" ${pending ? '' : 'disabled'}>Click “${esc(k.label)}” button</button>`).join('');
     document.querySelectorAll('#keywordBtns button').forEach(b => b.onclick = () => simulate({ key: b.dataset.key }));
-    ['sendText', 'sendTwice', 'cancel'].forEach(i => $(i).disabled = !pending);
+    ['sendText', 'sendTwice', 'cancel'].forEach(i => el(i).disabled = !pending);
 
-    $('audit').innerHTML = (r.audit || []).map(a => {
+    el('audit').innerHTML = (r.audit || []).map(a => {
       let detail = ''; try { detail = a.detailJson ? Object.entries(JSON.parse(a.detailJson)).map(([k, v]) => `${k}=${v}`).join(', ') : ''; } catch { detail = a.detailJson; }
       return `<div><span class="t">${fmt(a.at)}</span><b>${esc(a.eventType)}</b> <span class="muted">${esc(detail)}</span></div>`;
     }).join('');
 
-    $('runLog').textContent = run ? `${run.status}\n${run.log ?? ''}` : '(run not found)';
-    $('retryResume').hidden = !(run && run.status === 'ResumeFailed');
-  } catch (e) { $('msg').textContent = e.message; }
+    el('runLog').textContent = run ? `${run.status}\n${run.log ?? ''}` : '(run not found)';
+    el('retryResume').hidden = !(run && run.status === 'ResumeFailed');
+  } catch (e) { el('msg').textContent = e.message; }
 }
 
 async function simulate(payload) {
   try {
-    const res = await api('POST', '/demo/simulate-reply', { requestId: selected, responder: $('simResponder').value || null, ...payload });
+    const res = await api('POST', '/demo/simulate-reply', { requestId: selected, responder: el('simResponder').value || null, ...payload });
     show(res);
     return res;
-  } catch (e) { $('simResult').hidden = false; $('simResult').textContent = e.message; }
+  } catch (e) { el('simResult').hidden = false; el('simResult').textContent = e.message; }
   finally { await loadDetail(); loadList(); }
 }
-function show(res) { $('simResult').hidden = false; $('simResult').innerHTML = `<b>${esc(res.status)}</b>: ${esc(res.message)}`; }
+function show(res) { el('simResult').hidden = false; el('simResult').innerHTML = `<b>${esc(res.status)}</b>: ${esc(res.message)}`; }
 
-$('sendText').onclick = () => simulate({ text: $('simText').value });
+el('sendText').onclick = () => simulate({ text: el('simText').value });
 // Two identical injected deliveries are different events, so the second shows "AlreadyAnswered".
 // (True duplicate-delivery idempotency is covered by the DuplicateWebhookDelivery unit test.)
-$('sendTwice').onclick = async () => { await simulate({ text: $('simText').value }); await simulate({ text: $('simText').value }); };
-$('cancel').onclick = async () => {
-  try { await api('POST', `/api/hitl/requests/${selected}/cancel`); } catch (e) { $('simResult').hidden = false; $('simResult').textContent = e.message; }
+el('sendTwice').onclick = async () => { await simulate({ text: el('simText').value }); await simulate({ text: el('simText').value }); };
+el('cancel').onclick = async () => {
+  try { await api('POST', `/api/hitl/requests/${selected}/cancel`); } catch (e) { el('simResult').hidden = false; el('simResult').textContent = e.message; }
   loadDetail(); loadList();
 };
-$('retryResume').onclick = async () => {
+el('retryResume').onclick = async () => {
   const r = await api('GET', `/api/hitl/requests/${selected}`);
   try { await api('POST', `/api/hitl/runs/${r.workflowRunId}/retry-resume`); } catch (e) { alert(e.message); }
   loadDetail();
 };
 
-$('start').onclick = async () => {
-  $('msg').textContent = 'Starting...';
+el('start').onclick = async () => {
+  el('msg').textContent = 'Starting...';
   try {
     const res = await api('POST', '/demo/start', {
-      channel: $('channel').value, recipient: $('recipient').value, mode: $('mode').value, orderId: $('orderId').value,
-      timeoutMinutes: +$('timeout').value || null, onTimeout: $('onTimeout').value, defaultValue: $('defaultValue').value,
-      maxRetries: +$('maxRetries').value, allowedResponders: $('allowed').value || null,
-      fallbackChannel: $('onTimeout').value === 'Escalate' ? $('fbChannel').value : null,
-      fallbackRecipient: $('onTimeout').value === 'Escalate' ? $('fbRecipient').value : null,
-      whatsAppTemplate: $('waTemplate').value || null,
+      channel: el('channel').value, recipient: el('recipient').value, mode: el('mode').value, orderId: el('orderId').value,
+      timeoutMinutes: +el('timeout').value || null, onTimeout: el('onTimeout').value, defaultValue: el('defaultValue').value,
+      maxRetries: +el('maxRetries').value, allowedResponders: el('allowed').value || null,
+      fallbackChannel: el('onTimeout').value === 'Escalate' ? el('fbChannel').value : null,
+      fallbackRecipient: el('onTimeout').value === 'Escalate' ? el('fbRecipient').value : null,
+      whatsAppTemplate: el('waTemplate').value || null,
     });
-    $('msg').textContent = `Started ${res.runId}`;
+    el('msg').textContent = `Started ${res.runId}`;
     await select(res.requestId);
-  } catch (e) { $('msg').textContent = e.message; }
+  } catch (e) { el('msg').textContent = e.message; }
 };
 
-$('refresh').onclick = () => { loadList(); loadDetail(); };
+el('refresh').onclick = () => { loadList(); loadDetail(); };
 loadList();
 setInterval(() => { loadList(); loadDetail(); }, 3000);
 </script>
