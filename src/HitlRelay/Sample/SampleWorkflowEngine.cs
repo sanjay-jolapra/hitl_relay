@@ -63,6 +63,14 @@ public sealed class SampleWorkflowEngine : IWorkflowResumer
             },
         };
 
+        // Optional test-console overrides.
+        if (start.TimeoutMinutes is int tm) cfg.Timeout = TimeSpan.FromMinutes(tm);
+        if (Enum.TryParse<HitlTimeoutAction>(start.OnTimeout, true, out var action)) cfg.OnTimeout = action;
+        if (!string.IsNullOrEmpty(start.DefaultValue)) cfg.DefaultValue = start.DefaultValue;
+        if (start.MaxRetries is int mr) cfg.MaxRetries = mr;
+        if (!string.IsNullOrWhiteSpace(start.AllowedResponders))
+            cfg.AllowedResponders = start.AllowedResponders.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
         await AppendLogAsync(runId, "Start node executed", ct);
         var request = await _hitl.CreateAsync(cfg, runId, HitlNodeId, variables, ct); // run is now Waiting, no thread is held
         await AppendLogAsync(runId, $"HITL node sent request {request.Id} on {cfg.Channel}; run suspended", ct);

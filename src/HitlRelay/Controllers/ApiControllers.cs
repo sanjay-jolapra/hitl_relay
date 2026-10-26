@@ -57,7 +57,7 @@ public sealed class HitlRequestsController : KeyProtectedController
 
         return Ok(new
         {
-            r.Id, r.WorkflowRunId, r.NodeId, r.Channel, mode = r.Mode.ToString(), status = r.Status.ToString(),
+            r.Id, r.WorkflowRunId, r.NodeId, r.Channel, r.Prompt, r.Recipient, keywords = r.Keywords, mode = r.Mode.ToString(), status = r.Status.ToString(),
             r.RetryCount, r.CreatedAt, r.ExpiresAt, r.AnsweredAt,
             runStatus = run?.Status.ToString(),
             response = response == null ? null : new { response.Value, response.Text, response.ResponderDisplayName, response.ReceivedAt },
@@ -82,7 +82,11 @@ public sealed class HitlRequestsController : KeyProtectedController
 }
 
 public sealed record DemoStartRequest(string Channel, string Recipient, string Mode = "keyword", string? OrderId = null,
-    string? WhatsAppTemplate = null, string? FallbackChannel = null, string? FallbackRecipient = null);
+    string? WhatsAppTemplate = null, string? FallbackChannel = null, string? FallbackRecipient = null,
+    int? TimeoutMinutes = null, string? OnTimeout = null, string? DefaultValue = null,
+    string? AllowedResponders = null, int? MaxRetries = null);
+
+public sealed record SimulateReplyRequest(Guid RequestId, string? Key = null, string? Text = null, string? Responder = null);
 
 /// <summary>Sample workflow: Start, HITL, then a branch on response.value or an echo of response.text.</summary>
 [ApiController]
@@ -90,14 +94,60 @@ public sealed class DemoController : KeyProtectedController
 {
     private readonly SampleWorkflowEngine _engine;
     private readonly HitlDbContext _db;
+    private readonly HitlReplyHandler _handler;
     private readonly HitlOptions _options;
 
-    public DemoController(SampleWorkflowEngine engine, HitlDbContext db, IOptions<HitlOptions> options, IHostEnvironment env)
-        : base(options, env)
+    public DemoController(SampleWorkflowEngine engine, HitlDbContext db, HitlReplyHandler handler,
+        IOptions<HitlOptions> options, IHostEnvironment env) : base(options, env)
     {
         _engine = engine;
         _db = db;
+        _handler = handler;
         _options = options.Value;
+    }
+
+    /// <summary>Latest requests for the test console.</summary>
+    [HttpGet("/demo/requests")]
+    public async Task<IActionResult> List(CancellationToken ct)
+    {
+        if (!_options.EnableDemo) return NotFound();
+        if (!IsAuthorized()) return Unauthorized();
+        var rows = await _db.Requests.AsNoTracking().OrderByDescending(r => r.CreatedAt).Take(50)
+            .Select(r => new { r.Id, r.WorkflowRunId, r.Channel, r.Recipient, status = r.Status.ToString(), r.CreatedAt, r.ExpiresAt, r.RetryCount, r.Prompt })
+            .ToListAsync(ct);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// Injects a reply as if the channel had delivered it, going through the same handler (correlation, validation,
+    /// allowed responders, resume). Lets you test without vendor accounts. A key simulates a button click; text
+    /// simulates a typed reply correlated by thread/conversation.
+    /// </summary>
+    [HttpPost("/demo/simulate-reply")]
+    public async Task<IActionResult> SimulateReply([FromBody] SimulateReplyRequest body, CancellationToken ct)
+    {
+        if (!_options.EnableDemo) return NotFound();
+        if (!IsAuthorized()) return Unauthorized();
+        var req = await _db.Requests.AsNoTracking().FirstOrDefaultAsync(r => r.Id == body.RequestId, ct);
+        if (req == null) return NotFound();
+
+        var responder = string.IsNullOrWhiteSpace(body.Responder) ? req.Recipient : body.Responder.Trim();
+        var reply = new InboundReply
+        {
+            Channel = req.Channel,
+            CorrelationToken = string.IsNullOrEmpty(body.Key) ? null : req.CorrelationToken,
+            ActionValue = string.IsNullOrEmpty(body.Key) ? null : body.Key,
+            Text = body.Text,
+            ExternalThreadId = req.ExternalMessageId,
+            ExternalConversationId = req.ExternalConversationId,
+            ExternalMessageId = "sim:" + Guid.NewGuid().ToString("N"),
+            ResponderId = responder,
+            ResponderEmail = responder.Contains('@') ? responder : null,
+            ResponderDisplayName = responder,
+            ReceivedAt = DateTime.UtcNow,
+        };
+        var result = await _handler.HandleAsync(reply, ct);
+        return Ok(new { status = result.Status.ToString(), message = result.Message });
     }
 
     [HttpPost("/demo/start")]

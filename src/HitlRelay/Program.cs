@@ -18,6 +18,8 @@ using (var scope = app.Services.CreateScope())
     scope.ServiceProvider.GetRequiredService<HitlDbContext>().Database.EnsureCreated();
 }
 
+app.UseDefaultFiles();   // serves wwwroot/index.html: the test console (only useful when Hitl:EnableDemo is true)
+app.UseStaticFiles();
 app.MapControllers();
 app.Run();
 

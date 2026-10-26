@@ -34,17 +34,31 @@ Persist the ASP.NET Data Protection key ring (it encrypts `HitlChannelConnection
 
 Every webhook needs a public HTTPS URL (`Hitl:BaseUrl`); use a tunnel such as `ngrok http 5000` while developing.
 
-### Try the sample workflow (Development only)
+### Test console (Development only)
+
+Run in Development (`Hitl:EnableDemo` is on) and open `http://localhost:5000/`. The page lets you:
+
+1. **Start a request** on any channel with the timeout rule, retries, allowed responders and fallback you want. The **`test`**
+   channel is a loopback that needs no vendor account: the "messages" it would send appear in the audit trail.
+2. **Simulate a reply** through the same handler the real webhooks use: click a keyword button, send typed text (any case,
+   synonym or number), send a reply as a different responder (tests Allowed responders), send twice (tests "already answered"),
+   or cancel.
+3. **Watch** the request status, audit trail and the sample workflow's run log (Start, HITL, then the branch or echo). Retry a
+   run stuck in `ResumeFailed`.
+
+For a quick timeout test use a 1-minute timeout; the scheduler runs once a minute. Against real channels, the same page starts the
+request and you answer in the vendor app. Outside Development set `Hitl:ApiKey`, enter it in the page header, and
+`/api/hitl/*` and `/demo/*` require `X-Api-Key`. Disable the console in production (`Hitl:EnableDemo=false`).
+
+Equivalent API calls:
 
 ```bash
 curl -X POST localhost:5000/demo/start -H 'Content-Type: application/json' \
-  -d '{"channel":"telegram","recipient":"123456789","mode":"keyword"}'
-curl localhost:5000/demo/runs/<runId>      # shows the run log and status
-curl localhost:5000/api/hitl/requests/<requestId>
+  -d '{"channel":"test","recipient":"tester","mode":"keyword"}'
+curl -X POST localhost:5000/demo/simulate-reply -H 'Content-Type: application/json' \
+  -d '{"requestId":"<requestId>","text":"yes"}'
+curl localhost:5000/demo/runs/<runId>
 ```
-
-`mode` is `keyword` (Approve/Reject) or `open`. Add `fallbackChannel`/`fallbackRecipient` to use the Escalate timeout rule.
-Outside Development set `Hitl:ApiKey` and send it as `X-Api-Key` (the `/api/hitl/*` and `/demo/*` endpoints are otherwise closed).
 
 ## Using the node from your own engine
 

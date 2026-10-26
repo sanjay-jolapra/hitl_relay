@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HITL Test Console</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1c2430; --muted:#667085; --line:#e4e7ec; --accent:#1a56db;
+          --ok:#067647; --warn:#b54708; --bad:#b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151b; --card:#1b2029; --ink:#e6e9ef; --muted:#9aa4b2; --line:#2b3240; --accent:#6ea0ff;
+            --ok:#47cd89; --warn:#fdb022; --bad:#f97066; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:14px 20px; background:var(--card); border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; }
+  header .spacer { flex:1; }
+  main { display:grid; grid-template-columns: minmax(300px,380px) 1fr; gap:16px; padding:16px 20px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:16px; }
+  .card h2 { font-size:14px; margin:0 0 10px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+  input, select, textarea { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); font:inherit; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  button { padding:7px 13px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  button.danger { background:var(--bad); }
+  button:disabled { opacity:.5; cursor:default; }
+  .actions { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); font-size:13px; vertical-align:top; }
+  tr.sel td { background:color-mix(in srgb, var(--accent) 12%, transparent); }
+  tbody tr { cursor:pointer; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; border:1px solid currentColor; }
+  .Pending { color:var(--warn); } .Answered { color:var(--ok); } .TimedOut, .Cancelled { color:var(--bad); }
+  .muted { color:var(--muted); }
+  pre { margin:0; white-space:pre-wrap; word-break:break-word; font:12px/1.5 ui-monospace,Consolas,monospace; }
+  .timeline div { padding:4px 0; border-bottom:1px dashed var(--line); font-size:12.5px; }
+  .timeline .t { color:var(--muted); margin-right:8px; }
+  .out { margin-top:8px; padding:8px 10px; border-radius:6px; background:var(--bg); border:1px solid var(--line); }
+  .btns button { margin:0 6px 6px 0; }
+  .hint { font-size:12px; color:var(--muted); margin:6px 0 0; }
+  #msg { font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HITL Test Console</h1>
+  <span class="muted">Start requests, watch state, and simulate replies without a vendor account.</span>
+  <span class="spacer"></span>
+  <label style="margin:0">API key <input id="apiKey" type="password" placeholder="only if Hitl:ApiKey is set" style="width:200px;display:inline-block" /></label>
+</header>
+
+<main>
+  <section>
+    <div class="card">
+      <h2>1. Start a request</h2>
+      <label>Channel</label>
+      <select id="channel">
+        <option value="test">test (loopback, no vendor needed)</option>
+        <option>telegram</option><option>slack</option><option>whatsapp</option><option>teams</option><option>email</option>
+      </select>
+      <label>Recipient <span class="muted">(chat id, user/channel id, phone, AAD id or email)</span></label>
+      <input id="recipient" value="tester" />
+      <div class="row">
+        <div><label>Response mode</label>
+          <select id="mode"><option value="keyword">keyword (Approve / Reject)</option><option value="open">open-ended</option></select></div>
+        <div><label>Order id (template variable)</label><input id="orderId" value="A-1001" /></div>
+      </div>
+      <div class="row">
+        <div><label>Timeout (minutes)</label><input id="timeout" type="number" min="1" value="2" /></div>
+        <div><label>On timeout</label>
+          <select id="onTimeout"><option>Fail</option><option>ContinueWithDefault</option><option>Escalate</option><option>Reminder</option></select></div>
+      </div>
+      <div class="row">
+        <div><label>Default value (ContinueWithDefault)</label><input id="defaultValue" value="reject" /></div>
+        <div><label>Max retries</label><input id="maxRetries" type="number" min="0" value="2" /></div>
+      </div>
+      <div class="row">
+        <div><label>Fallback channel (Escalate)</label><input id="fbChannel" value="test" /></div>
+        <div><label>Fallback recipient</label><input id="fbRecipient" value="manager" /></div>
+      </div>
+      <label>Allowed responders <span class="muted">(comma separated, optional)</span></label>
+      <input id="allowed" placeholder="e.g. tester,boss@example.com" />
+      <label>WhatsApp template name <span class="muted">(only for whatsapp)</span></label>
+      <input id="waTemplate" />
+      <div class="actions"><button id="start">Start workflow</button><span id="msg"></span></div>
+      <p class="hint">The scheduler checks once a minute, so timeouts fire within about a minute of expiry.</p>
+    </div>
+
+    <div class="card">
+      <h2>Requests <button class="secondary" id="refresh" style="float:right;padding:2px 9px">Refresh</button></h2>
+      <table>
+        <thead><tr><th>Channel</th><th>Status</th><th>Created</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="hint" id="empty" hidden>No requests yet.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="card" id="detail" hidden>
+      <h2>2. Request <span id="dId" class="muted"></span></h2>
+      <div><span id="dStatus" class="pill"></span> &nbsp; run: <b id="dRun"></b> &nbsp; retries: <b id="dRetry"></b>
+        &nbsp; expires: <span id="dExp" class="muted"></span></div>
+      <div class="out"><b>Prompt sent to <span id="dRecipient"></span>:</b><br /><span id="dPrompt"></span></div>
+
+      <h2 style="margin-top:16px">3. Simulate a reply</h2>
+      <div id="keywordBtns" class="btns"></div>
+      <label>Typed text <span class="muted">(typed keyword, synonym, number, or open-ended answer)</span></label>
+      <input id="simText" placeholder="e.g. YES, 2, or free text" />
+      <label>Responder <span class="muted">(blank = the recipient; set another to test Allowed responders)</span></label>
+      <input id="simResponder" />
+      <div class="actions">
+        <button id="sendText">Send typed reply</button>
+        <button class="secondary" id="sendTwice">Send same reply twice (idempotency)</button>
+        <button class="danger" id="cancel">Cancel request</button>
+      </div>
+      <div class="out" id="simResult" hidden></div>
+
+      <h2 style="margin-top:16px">Audit trail</h2>
+      <div class="timeline" id="audit"></div>
+
+      <h2 style="margin-top:16px">Workflow run</h2>
+      <pre id="runLog" class="out"></pre>
+      <div class="actions"><button class="secondary" id="retryResume" hidden>Retry resume</button></div>
+    </div>
+    <div class="card" id="placeholder"><span class="muted">Start a request or select one from the list.</span></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let selected = null;
+
+$('apiKey').value = (() => { try { return localStorage.getItem('hitlApiKey') || ''; } catch { return ''; } })();
+$('apiKey').addEventListener('change', () => { try { localStorage.setItem('hitlApiKey', $('apiKey').value); } catch {} });
+
+async function api(method, url, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if ($('apiKey').value) headers['X-Api-Key'] = $('apiKey').value;
+  const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const text = await res.text();
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!res.ok) throw new Error((data && data.error) || `${res.status} ${res.statusText}` + (res.status === 404 ? ' (is Hitl:EnableDemo on?)' : ''));
+  return data;
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = d => d ? new Date(d.endsWith('Z') ? d : d + 'Z').toLocaleTimeString() : '';
+
+async function loadList() {
+  try {
+    const rows = await api('GET', '/demo/requests');
+    $('rows').innerHTML = rows.map(r =>
+      `<tr data-id="${r.id}" class="${r.id === selected ? 'sel' : ''}"><td>${esc(r.channel)}<br><span class="muted">${esc(r.recipient)}</span></td>` +
+      `<td><span class="pill ${r.status}">${r.status}</span></td><td>${fmt(r.createdAt)}</td></tr>`).join('');
+    $('empty').hidden = rows.length > 0;
+    document.querySelectorAll('#rows tr').forEach(tr => tr.onclick = () => select(tr.dataset.id));
+  } catch (e) { $('msg').textContent = e.message; }
+}
+
+async function select(id) {
+  selected = id;
+  await loadDetail();
+  loadList();
+}
+
+async function loadDetail() {
+  if (!selected) return;
+  try {
+    const r = await api('GET', `/api/hitl/requests/${selected}`);
+    const run = await api('GET', `/demo/runs/${r.workflowRunId}`).catch(() => null);
+    $('detail').hidden = false; $('placeholder').hidden = true;
+    $('dId').textContent = r.id;
+    $('dStatus').textContent = r.status; $('dStatus').className = 'pill ' + r.status;
+    $('dRun').textContent = `${r.workflowRunId} (${r.runStatus ?? '?'})`;
+    $('dRetry').textContent = r.retryCount;
+    $('dExp').textContent = fmt(r.expiresAt);
+    $('dRecipient').textContent = `${r.channel}:${r.recipient}`;
+    $('dPrompt').textContent = r.prompt;
+
+    const pending = r.status === 'Pending';
+    $('keywordBtns').innerHTML = (r.keywords || []).map(k =>
+      `<button class="secondary" data-key="${esc(k.key)}" ${pending ? '' : 'disabled'}>Click “${esc(k.label)}” button</button>`).join('');
+    document.querySelectorAll('#keywordBtns button').forEach(b => b.onclick = () => simulate({ key: b.dataset.key }));
+    ['sendText', 'sendTwice', 'cancel'].forEach(i => $(i).disabled = !pending);
+
+    $('audit').innerHTML = (r.audit || []).map(a => {
+      let detail = ''; try { detail = a.detailJson ? Object.entries(JSON.parse(a.detailJson)).map(([k, v]) => `${k}=${v}`).join(', ') : ''; } catch { detail = a.detailJson; }
+      return `<div><span class="t">${fmt(a.at)}</span><b>${esc(a.eventType)}</b> <span class="muted">${esc(detail)}</span></div>`;
+    }).join('');
+
+    $('runLog').textContent = run ? `${run.status}\n${run.log ?? ''}` : '(run not found)';
+    $('retryResume').hidden = !(run && run.status === 'ResumeFailed');
+  } catch (e) { $('msg').textContent = e.message; }
+}
+
+async function simulate(payload) {
+  try {
+    const res = await api('POST', '/demo/simulate-reply', { requestId: selected, responder: $('simResponder').value || null, ...payload });
+    show(res);
+    return res;
+  } catch (e) { $('simResult').hidden = false; $('simResult').textContent = e.message; }
+  finally { await loadDetail(); loadList(); }
+}
+function show(res) { $('simResult').hidden = false; $('simResult').innerHTML = `<b>${esc(res.status)}</b>: ${esc(res.message)}`; }
+
+$('sendText').onclick = () => simulate({ text: $('simText').value });
+// Two identical injected deliveries are different events, so the second shows "AlreadyAnswered".
+// (True duplicate-delivery idempotency is covered by the DuplicateWebhookDelivery unit test.)
+$('sendTwice').onclick = async () => { await simulate({ text: $('simText').value }); await simulate({ text: $('simText').value }); };
+$('cancel').onclick = async () => {
+  try { await api('POST', `/api/hitl/requests/${selected}/cancel`); } catch (e) { $('simResult').hidden = false; $('simResult').textContent = e.message; }
+  loadDetail(); loadList();
+};
+$('retryResume').onclick = async () => {
+  const r = await api('GET', `/api/hitl/requests/${selected}`);
+  try { await api('POST', `/api/hitl/runs/${r.workflowRunId}/retry-resume`); } catch (e) { alert(e.message); }
+  loadDetail();
+};
+
+$('start').onclick = async () => {
+  $('msg').textContent = 'Starting...';
+  try {
+    const res = await api('POST', '/demo/start', {
+      channel: $('channel').value, recipient: $('recipient').value, mode: $('mode').value, orderId: $('orderId').value,
+      timeoutMinutes: +$('timeout').value || null, onTimeout: $('onTimeout').value, defaultValue: $('defaultValue').value,
+      maxRetries: +$('maxRetries').value, allowedResponders: $('allowed').value || null,
+      fallbackChannel: $('onTimeout').value === 'Escalate' ? $('fbChannel').value : null,
+      fallbackRecipient: $('onTimeout').value === 'Escalate' ? $('fbRecipient').value : null,
+      whatsAppTemplate: $('waTemplate').value || null,
+    });
+    $('msg').textContent = `Started ${res.runId}`;
+    await select(res.requestId);
+  } catch (e) { $('msg').textContent = e.message; }
+};
+
+$('refresh').onclick = () => { loadList(); loadDetail(); };
+loadList();
+setInterval(() => { loadList(); loadDetail(); }, 3000);
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 using HitlRelay.Channels.Email;
 using HitlRelay.Channels.Slack;
 using HitlRelay.Channels.Teams;
+using HitlRelay.Channels.Test;
 using HitlRelay.Channels.Telegram;
 using HitlRelay.Channels.WhatsApp;
 using HitlRelay.Core;
@@ -54,6 +55,10 @@ public static class ServiceCollectionExtensions
         AddAdapter<TeamsAdapter>(services, ChannelKeys.Teams);
 
         services.AddHostedService<TelegramWebhookRegistrar>();
+
+        // "test" loopback channel for the test console: no vendor account needed (only when Hitl:EnableDemo is on).
+        if (config.GetValue<bool>("Hitl:EnableDemo"))
+            AddAdapter<TestAdapter>(services, TestAdapter.Key);
 
         // Teams: Bot Framework authentication reads MicrosoftAppId/Password/Type/TenantId from this section.
         services.AddSingleton<BotFrameworkAuthentication>(sp =>
