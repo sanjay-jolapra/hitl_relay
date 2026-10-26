@@ -58,7 +58,10 @@ public static class ServiceCollectionExtensions
         // Teams: Bot Framework authentication reads MicrosoftAppId/Password/Type/TenantId from this section.
         services.AddSingleton<BotFrameworkAuthentication>(sp =>
             new ConfigurationBotFrameworkAuthentication(config.GetSection("Channels:Teams")));
-        services.AddSingleton<CloudAdapter>();
+        // CloudAdapter has two public constructors, which DI cannot choose between, so pick one explicitly.
+        services.AddSingleton<CloudAdapter>(sp => new CloudAdapter(
+            sp.GetRequiredService<BotFrameworkAuthentication>(),
+            sp.GetRequiredService<ILogger<CloudAdapter>>()));
         services.AddTransient<TeamsHitlBot>();
         services.AddScoped<ChannelConnectionStore>();
 
