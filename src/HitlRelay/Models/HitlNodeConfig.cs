@@ -58,4 +58,11 @@ public sealed class HitlNodeConfig
     public string? ValidationRegex { get; set; }
     public string? ValidationMessage { get; set; }
     public WhatsAppTemplateConfig? WhatsAppTemplate { get; set; }
+
+    /// <summary>
+    /// Teams only. When set (it may use workflow variables, e.g. "{{order.id}}"), the request is posted into a channel
+    /// named after this key in the fixed team (Channels:Teams:TeamId): one channel per key, created on first use, and
+    /// every request becomes its own post (thread) in that channel. Recipient is then not required.
+    /// </summary>
+    public string? TeamsChannelKey { get; set; }
 }

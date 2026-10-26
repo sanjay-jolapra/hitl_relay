@@ -41,7 +41,10 @@ public sealed class SampleWorkflowEngine : IWorkflowResumer
         var cfg = new HitlNodeConfig
         {
             Channel = start.Channel,
-            Recipient = start.Recipient,
+            Recipient = start.Recipient ?? "",
+            // Teams with no recipient: one channel per order id in the fixed team, each request its own post.
+            TeamsChannelKey = start.Channel.Equals("teams", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(start.Recipient)
+                ? "{{order.id}}" : null,
             MessageTemplate = open
                 ? "Order {{order.id}} needs a note. What should we write on the shipping label?"
                 : "Please approve order {{order.id}} for {{order.amount}}.",

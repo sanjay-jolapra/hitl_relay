@@ -81,7 +81,7 @@ public sealed class HitlRequestsController : KeyProtectedController
     }
 }
 
-public sealed record DemoStartRequest(string Channel, string Recipient, string Mode = "keyword", string? OrderId = null,
+public sealed record DemoStartRequest(string Channel, string? Recipient, string Mode = "keyword", string? OrderId = null,
     string? WhatsAppTemplate = null, string? FallbackChannel = null, string? FallbackRecipient = null,
     int? TimeoutMinutes = null, string? OnTimeout = null, string? DefaultValue = null,
     string? AllowedResponders = null, int? MaxRetries = null);

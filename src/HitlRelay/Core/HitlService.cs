@@ -46,6 +46,17 @@ public sealed class HitlService
         IReadOnlyDictionary<string, object?>? variables, Guid? escalatedFrom, CancellationToken ct)
     {
         Validate(cfg);
+
+        // Render the Teams channel key (e.g. "{{order.id}}") once, on a copy so the caller's config is untouched; the
+        // rendered value is what gets stored in ConfigJson and read back by the adapter.
+        if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey))
+        {
+            cfg = HitlJson.Deserialize<HitlNodeConfig>(HitlJson.Serialize(cfg))!;
+            cfg.TeamsChannelKey = TemplateRenderer.Render(cfg.TeamsChannelKey!, variables).Trim();
+            if (cfg.TeamsChannelKey.Length == 0)
+                throw new ArgumentException("TeamsChannelKey rendered to an empty value (is the workflow variable set?).");
+            if (string.IsNullOrWhiteSpace(cfg.Recipient)) cfg.Recipient = "channel:" + cfg.TeamsChannelKey;
+        }
         var adapter = _adapters.Get(cfg.Channel);
         var now = Now;
 
@@ -141,7 +152,10 @@ public sealed class HitlService
     private static void Validate(HitlNodeConfig cfg)
     {
         if (string.IsNullOrWhiteSpace(cfg.Channel)) throw new ArgumentException("Channel is required.");
-        if (string.IsNullOrWhiteSpace(cfg.Recipient)) throw new ArgumentException("Recipient is required.");
+        if (string.IsNullOrWhiteSpace(cfg.Recipient) && string.IsNullOrWhiteSpace(cfg.TeamsChannelKey))
+            throw new ArgumentException("Recipient is required.");
+        if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey) && !cfg.Channel.Equals(ChannelKeys.Teams, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("TeamsChannelKey is only valid for the Teams channel.");
         if (cfg.ResponseMode == HitlResponseMode.Keyword && cfg.AllowedKeywords.Count == 0)
             throw new ArgumentException("Keyword mode needs at least one allowed keyword.");
         if (cfg.OnTimeout == HitlTimeoutAction.ContinueWithDefault && string.IsNullOrEmpty(cfg.DefaultValue))

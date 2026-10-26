@@ -83,6 +83,7 @@ public abstract class FakeAdapter : IHitlChannelAdapter
 
 public sealed class FakeSlackAdapter : FakeAdapter { public FakeSlackAdapter(FakeChannelLog l) : base(ChannelKeys.Slack, l) { } }
 public sealed class FakeTelegramAdapter : FakeAdapter { public FakeTelegramAdapter(FakeChannelLog l) : base(ChannelKeys.Telegram, l) { } }
+public sealed class FakeTeamsAdapter : FakeAdapter { public FakeTeamsAdapter(FakeChannelLog l) : base(ChannelKeys.Teams, l) { } }
 public sealed class FakeWhatsAppAdapter : FakeAdapter { public FakeWhatsAppAdapter(FakeChannelLog l) : base(ChannelKeys.WhatsApp, l) { } }
 
 /// <summary>Builds the real core (SQLite file DB) with fake channel adapters. Pass a path to simulate a restart.</summary>
@@ -114,6 +115,7 @@ public sealed class Harness : IDisposable
             (ChannelKeys.Slack, typeof(FakeSlackAdapter)),
             (ChannelKeys.Telegram, typeof(FakeTelegramAdapter)),
             (ChannelKeys.WhatsApp, typeof(FakeWhatsAppAdapter)),
+            (ChannelKeys.Teams, typeof(FakeTeamsAdapter)),
         })
         {
             services.AddScoped(type);

@@ -44,6 +44,15 @@ public sealed class TeamsOptions
     public string MicrosoftAppPassword { get; set; } = "";
     public string MicrosoftAppType { get; set; } = "SingleTenant";
     public string MicrosoftAppTenantId { get; set; } = "";
+
+    // ---- Channel-per-order mode (HitlNodeConfig.TeamsChannelKey) ----
+    /// <summary>Id of the fixed team that holds the per-order channels (Graph team id, a GUID).</summary>
+    public string TeamId { get; set; } = "";
+    /// <summary>Channel display name = prefix + key, for example "Order A-1001".</summary>
+    public string ChannelNamePrefix { get; set; } = "Order ";
+    public string ChannelDescription { get; set; } = "Created by HITL Relay for approval requests on this order.";
+    /// <summary>Bot Framework service URL used to post into channels; the bot also remembers the one it last saw.</summary>
+    public string ServiceUrl { get; set; } = "https://smba.trafficmanager.net/teams/";
 }
 
 public sealed class EmailOptions

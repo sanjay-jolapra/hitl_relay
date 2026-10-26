@@ -115,7 +115,20 @@ Config keys live in `appsettings.json` under `Channels:*`; the template lists ev
 3. Package a Teams app manifest for the bot (scope `personal`) and install it for each user. The bot stores each user's
    `ConversationReference` (encrypted) on install or first message; **proactive messaging fails for users who never installed it.**
    Recipient = the user's AAD object id or Teams user id (`29:...`).
-4. Keyword mode sends an Adaptive Card with `Action.Submit` buttons whose data is `{"hitlToken": "...", "key": "approve"}`;
+4. **Channel per order (fixed team):** set `TeamsChannelKey` on the node (for example `{{order.id}}`) and leave Recipient empty.
+   The app then finds or creates a channel named `ChannelNamePrefix + key` (for example "Order A-1001") in the team
+   `Channels:Teams:TeamId`, and posts every request for that order as its own new post (thread) in that channel. Setup:
+   * Install the bot in that team (Teams: team, Manage team, Apps, add the HITL bot).
+   * Give the same Entra app registration the Graph application permissions `Channel.Create` and `ChannelSettings.Read.All`
+     (admin consent), because the app creates and looks up channels with its own credentials.
+   * `TeamId` is the team's Graph id (a GUID; in the team's "Get link to team" URL it is the `groupId` value).
+   * Channel names are sanitised (max 50 characters; `~ # % & * { } + / \ : < > ? | ' "` become `-`). The key to channel id
+     mapping is cached in `HitlChannelConnection`; if a channel with the name already exists it is reused.
+   * Card buttons work for everyone in the channel. A typed reply in the post is only delivered to the bot when the bot is
+     @mentioned (or the app has the `ChannelMessage.Read.Group` RSC permission), so prefer the buttons, or @mention the bot.
+   * Limits: channel creation is serialised per process; with several instances a duplicate-name error is handled by
+     looking the existing channel up. Channels are never deleted automatically.
+5. Keyword mode sends an Adaptive Card with `Action.Submit` buttons whose data is `{"hitlToken": "...", "key": "approve"}`;
    after the answer the card is replaced by the outcome (`UpdateActivityAsync`).
 
 ### Email

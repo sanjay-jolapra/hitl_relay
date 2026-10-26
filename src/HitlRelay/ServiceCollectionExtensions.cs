@@ -69,6 +69,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ILogger<CloudAdapter>>()));
         services.AddTransient<TeamsHitlBot>();
         services.AddScoped<ChannelConnectionStore>();
+        services.AddHttpClient<TeamsChannelProvisioner>();
 
         // E-mail: SMTP (MailKit) or Microsoft Graph, chosen by Channels:Email:Provider.
         services.AddSingleton<EmailTokenService>();

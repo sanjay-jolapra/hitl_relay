@@ -35,6 +35,7 @@ public sealed class ChannelConnectionStore
             row = new HitlChannelConnection { Channel = channel, Key = key };
             _db.ChannelConnections.Add(row);
         }
+        if (row.ConfigJson != "" && _protector.Unprotect(row.ConfigJson) == json) return; // unchanged: avoid churn
         row.ConfigJson = _protector.Protect(json);
         row.Enabled = true;
         try
@@ -70,12 +71,14 @@ public sealed class TeamsAdapter : IHitlChannelAdapter
     private readonly CloudAdapter _bot;
     private readonly ChannelConnectionStore _store;
     private readonly TeamsOptions _opt;
+    private readonly TeamsChannelProvisioner _channels;
 
-    public TeamsAdapter(CloudAdapter bot, ChannelConnectionStore store, IOptions<TeamsOptions> opt)
+    public TeamsAdapter(CloudAdapter bot, ChannelConnectionStore store, IOptions<TeamsOptions> opt, TeamsChannelProvisioner channels)
     {
         _bot = bot;
         _store = store;
         _opt = opt.Value;
+        _channels = channels;
     }
 
     public string ChannelKey => Channel;
@@ -84,13 +87,18 @@ public sealed class TeamsAdapter : IHitlChannelAdapter
     {
         var json = JsonConvert.SerializeObject(activity.GetConversationReference());
         // Index under both ids so the node's Recipient can be either.
+        if (!string.IsNullOrEmpty(activity.ServiceUrl)) await _store.SaveAsync(Channel, "serviceUrl", activity.ServiceUrl, ct);
         if (!string.IsNullOrEmpty(activity.From?.Id)) await _store.SaveAsync(Channel, activity.From.Id, json, ct);
         if (!string.IsNullOrEmpty(activity.From?.AadObjectId)) await _store.SaveAsync(Channel, activity.From.AadObjectId, json, ct);
     }
 
     public async Task<SendResult> SendAsync(HitlRequest request, CancellationToken ct)
     {
-        var reference = await LoadReferenceAsync(request.Recipient, ct)
+        var channelKey = request.Config.TeamsChannelKey;
+        if (!string.IsNullOrWhiteSpace(channelKey))
+            return await SendToChannelPostAsync(request, channelKey, ct);
+
+        var reference = await LoadReferenceAsync(request, ct)
             ?? throw new HitlRecipientUnreachableException(
                 "No Teams conversation reference for this recipient: the bot must be installed for (or messaged by) the user first.");
 
@@ -103,6 +111,53 @@ public sealed class TeamsAdapter : IHitlChannelAdapter
         }, ct);
 
         return new SendResult(activityId, null, conversationId);
+    }
+
+    /// <summary>
+    /// Channel-per-order mode: make sure the channel for the key exists in the fixed team, then start a NEW post (thread)
+    /// in it carrying the card. The thread's conversation reference is stored per request so the card can be updated and
+    /// follow-ups land in the same post. The bot must be installed in the team.
+    /// </summary>
+    private async Task<SendResult> SendToChannelPostAsync(HitlRequest request, string key, CancellationToken ct)
+    {
+        var channelId = await _channels.EnsureChannelAsync(key, ct);
+        var serviceUrl = await _store.GetAsync(Channel, "serviceUrl", ct) ?? _opt.ServiceUrl;
+
+        var activity = (Activity)MessageFactory.Attachment(Card(request, null));
+        var parameters = new ConversationParameters
+        {
+            IsGroup = true,
+            Bot = new ChannelAccount(_opt.MicrosoftAppId),
+            ChannelData = new Microsoft.Bot.Schema.Teams.TeamsChannelData { Channel = new Microsoft.Bot.Schema.Teams.ChannelInfo(channelId) },
+            Activity = activity,
+        };
+        if (!string.IsNullOrEmpty(_opt.MicrosoftAppTenantId)) parameters.TenantId = _opt.MicrosoftAppTenantId;
+
+        string? conversationId = null, activityId = null, referenceJson = null;
+        try
+        {
+            await _bot.CreateConversationAsync(_opt.MicrosoftAppId, "msteams", serviceUrl, null, parameters, (turn, token) =>
+            {
+                var a = turn.Activity;
+                conversationId = a.Conversation?.Id;
+                activityId = a.Id;
+                referenceJson = JsonConvert.SerializeObject(a.GetConversationReference());
+                return Task.CompletedTask;
+            }, ct);
+        }
+        catch (Exception ex) when (ex.Message.Contains("403") || ex.Message.Contains("Forbidden", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new HitlRecipientUnreachableException(
+                "The bot cannot post in the team channel: install the HITL bot in the team (and check the app id/tenant).", ex);
+        }
+
+        if (conversationId == null || referenceJson == null)
+            throw new InvalidOperationException("Teams did not return a conversation for the new channel post.");
+
+        // The thread (post) id is the "messageid" part of the conversation id: 19:...@thread.tacv2;messageid=1700000000000
+        var threadId = activityId ?? conversationId.Split("messageid=", 2).ElementAtOrDefault(1);
+        await _store.SaveAsync(ThreadChannel, request.Id.ToString("N"), referenceJson, ct);
+        return new SendResult(threadId, threadId, conversationId);
     }
 
     public bool VerifyInbound(HttpRequest httpRequest, string rawBody) => !string.IsNullOrWhiteSpace(rawBody);
@@ -149,7 +204,7 @@ public sealed class TeamsAdapter : IHitlChannelAdapter
 
     public async Task AcknowledgeAsync(HitlRequest request, HitlOutcome outcome, CancellationToken ct)
     {
-        var reference = await LoadReferenceAsync(request.Recipient, ct);
+        var reference = await LoadReferenceAsync(request, ct);
         if (reference == null || request.ExternalMessageId == null) return;
 
         await _bot.ContinueConversationAsync(_opt.MicrosoftAppId, reference, async (turn, token) =>
@@ -163,15 +218,19 @@ public sealed class TeamsAdapter : IHitlChannelAdapter
 
     public async Task SendTextAsync(HitlRequest request, string text, CancellationToken ct)
     {
-        var reference = await LoadReferenceAsync(request.Recipient, ct);
+        var reference = await LoadReferenceAsync(request, ct);
         if (reference == null) return;
         await _bot.ContinueConversationAsync(_opt.MicrosoftAppId, reference,
             async (turn, token) => await turn.SendActivityAsync(MessageFactory.Text(text), token), ct);
     }
 
-    private async Task<ConversationReference?> LoadReferenceAsync(string recipient, CancellationToken ct)
+    private const string ThreadChannel = "teams-thread";
+
+    /// <summary>The post's own thread reference when it was created in a channel, else the recipient's personal chat.</summary>
+    private async Task<ConversationReference?> LoadReferenceAsync(HitlRequest request, CancellationToken ct)
     {
-        var json = await _store.GetAsync(Channel, recipient, ct);
+        var json = await _store.GetAsync(ThreadChannel, request.Id.ToString("N"), ct)
+                   ?? await _store.GetAsync(Channel, request.Recipient, ct);
         return json == null ? null : JsonConvert.DeserializeObject<ConversationReference>(json);
     }
 
