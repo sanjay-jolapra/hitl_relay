@@ -70,6 +70,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<TeamsHitlBot>();
         services.AddScoped<ChannelConnectionStore>();
         services.AddHttpClient<TeamsChannelProvisioner>();
+        services.AddHttpClient<SlackChannelProvisioner>();
 
         // E-mail: SMTP (MailKit) or Microsoft Graph, chosen by Channels:Email:Provider.
         services.AddSingleton<EmailTokenService>();

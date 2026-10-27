@@ -47,15 +47,14 @@ public sealed class HitlService
     {
         Validate(cfg);
 
-        // Render the Teams channel key (e.g. "{{order.id}}") once, on a copy so the caller's config is untouched; the
-        // rendered value is what gets stored in ConfigJson and read back by the adapter.
-        if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey))
+        // Render the per-key channel setting (e.g. "{{order.id}}") once, on a copy so the caller's config is untouched;
+        // the rendered value is what gets stored in ConfigJson and read back by the adapter.
+        if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey) || !string.IsNullOrWhiteSpace(cfg.SlackChannelKey))
         {
             cfg = HitlJson.Deserialize<HitlNodeConfig>(HitlJson.Serialize(cfg))!;
-            cfg.TeamsChannelKey = TemplateRenderer.Render(cfg.TeamsChannelKey!, variables).Trim();
-            if (cfg.TeamsChannelKey.Length == 0)
-                throw new ArgumentException("TeamsChannelKey rendered to an empty value (is the workflow variable set?).");
-            if (string.IsNullOrWhiteSpace(cfg.Recipient)) cfg.Recipient = "channel:" + cfg.TeamsChannelKey;
+            if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey)) cfg.TeamsChannelKey = RenderKey(cfg.TeamsChannelKey, variables, nameof(cfg.TeamsChannelKey));
+            if (!string.IsNullOrWhiteSpace(cfg.SlackChannelKey)) cfg.SlackChannelKey = RenderKey(cfg.SlackChannelKey, variables, nameof(cfg.SlackChannelKey));
+            if (string.IsNullOrWhiteSpace(cfg.Recipient)) cfg.Recipient = "channel:" + (cfg.TeamsChannelKey ?? cfg.SlackChannelKey);
         }
         var adapter = _adapters.Get(cfg.Channel);
         var now = Now;
@@ -149,13 +148,23 @@ public sealed class HitlService
         return req;
     }
 
+    private static string RenderKey(string template, IReadOnlyDictionary<string, object?>? variables, string setting)
+    {
+        var key = TemplateRenderer.Render(template, variables).Trim();
+        return key.Length == 0
+            ? throw new ArgumentException($"{setting} rendered to an empty value (is the workflow variable set?).")
+            : key;
+    }
+
     private static void Validate(HitlNodeConfig cfg)
     {
         if (string.IsNullOrWhiteSpace(cfg.Channel)) throw new ArgumentException("Channel is required.");
-        if (string.IsNullOrWhiteSpace(cfg.Recipient) && string.IsNullOrWhiteSpace(cfg.TeamsChannelKey))
+        if (string.IsNullOrWhiteSpace(cfg.Recipient) && string.IsNullOrWhiteSpace(cfg.TeamsChannelKey) && string.IsNullOrWhiteSpace(cfg.SlackChannelKey))
             throw new ArgumentException("Recipient is required.");
         if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey) && !cfg.Channel.Equals(ChannelKeys.Teams, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("TeamsChannelKey is only valid for the Teams channel.");
+        if (!string.IsNullOrWhiteSpace(cfg.SlackChannelKey) && !cfg.Channel.Equals(ChannelKeys.Slack, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("SlackChannelKey is only valid for the Slack channel.");
         if (cfg.ResponseMode == HitlResponseMode.Keyword && cfg.AllowedKeywords.Count == 0)
             throw new ArgumentException("Keyword mode needs at least one allowed keyword.");
         if (cfg.OnTimeout == HitlTimeoutAction.ContinueWithDefault && string.IsNullOrEmpty(cfg.DefaultValue))

@@ -65,4 +65,11 @@ public sealed class HitlNodeConfig
     /// every request becomes its own post (thread) in that channel. Recipient is then not required.
     /// </summary>
     public string? TeamsChannelKey { get; set; }
+
+    /// <summary>
+    /// Slack only. Same idea as TeamsChannelKey: when set (for example "{{order.id}}") the request is posted into the
+    /// channel named after this key, which is created on first use; every request is its own top-level message (thread).
+    /// Recipient is then not required.
+    /// </summary>
+    public string? SlackChannelKey { get; set; }
 }

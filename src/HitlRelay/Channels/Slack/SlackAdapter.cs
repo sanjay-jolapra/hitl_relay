@@ -26,11 +26,15 @@ public sealed class SlackAdapter : IHitlChannelAdapter
     private readonly SlackOptions _opt;
     private readonly TimeProvider _clock;
 
-    public SlackAdapter(HttpClient http, IOptions<SlackOptions> opt, TimeProvider clock)
+    private readonly SlackChannelProvisioner? _channels;
+
+    // channels is optional only so the adapter can be constructed without a database (signature tests).
+    public SlackAdapter(HttpClient http, IOptions<SlackOptions> opt, TimeProvider clock, SlackChannelProvisioner? channels = null)
     {
         _http = http;
         _opt = opt.Value;
         _clock = clock;
+        _channels = channels;
     }
 
     public string ChannelKey => ChannelKeys.Slack;
@@ -58,7 +62,14 @@ public sealed class SlackAdapter : IHitlChannelAdapter
             blocks.Add(new { type = "context", elements = new[] { new { type = "mrkdwn", text = "_Reply in this thread to answer._" } } });
         }
 
-        var resp = await CallAsync("chat.postMessage", new { channel = request.Recipient, text = request.Prompt, blocks }, ct);
+        // Channel-per-key mode: find or create the channel, then post a NEW top-level message (its own thread) in it.
+        var target = request.Recipient;
+        var key = request.Config.SlackChannelKey;
+        if (!string.IsNullOrWhiteSpace(key))
+            target = await (_channels ?? throw new InvalidOperationException("Slack channel provisioning is not configured."))
+                .EnsureChannelAsync(key, ct);
+
+        var resp = await CallAsync("chat.postMessage", new { channel = target, text = request.Prompt, blocks }, ct);
         var ts = resp.GetProperty("ts").GetString();
         var channel = resp.GetProperty("channel").GetString();
         return new SendResult(ts, ts, channel);

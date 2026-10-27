@@ -97,6 +97,16 @@ Config keys live in `appsettings.json` under `Channels:*`; the template lists ev
 3. Interactivity: Request URL `{BaseUrl}/slack/interactivity`.
 4. Put the Bot User OAuth Token in `BotToken` and the Signing Secret in `SigningSecret`. Recipient = user ID (DM) or channel ID.
    Keyword answers are Block Kit buttons; open-ended answers are thread replies (or any message in a DM).
+5. **Channel per order:** set `SlackChannelKey` on the node (for example `{{order.id}}`) and leave Recipient empty. The app finds or
+   creates a channel named `ChannelNamePrefix + key` (for example `order-a-1001`, lowercased and sanitised, max 80 characters) in the
+   workspace the bot token belongs to, and posts each request as its own new top-level message (thread) there. If the channel
+   already exists it is reused (the bot joins it if needed). Extra bot scopes: `channels:manage`, `channels:join`, `channels:read`
+   (add `groups:write` and `groups:read` with `PrivateChannels=true`). `InviteUserIds` lists Slack user ids (U...) that are invited
+   when a channel is created, so the right people see it. For typed replies in channels subscribe to `message.channels`; buttons
+   need nothing extra. A private channel that already exists must have the bot invited by hand.
+6. **Workspaces cannot be auto-created.** Slack has no API to create a workspace (only Enterprise Grid admins can, with an org-level
+   admin token, and each new workspace would still need the app installed to get a bot token). Create the workspace once, install the
+   app, and use its token; channels are then created automatically.
 
 ### WhatsApp (Cloud API)
 1. Meta developer app with the WhatsApp product; copy the permanent token, Phone Number ID and App Secret.

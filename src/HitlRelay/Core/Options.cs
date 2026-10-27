@@ -19,6 +19,13 @@ public sealed class SlackOptions
 {
     public string BotToken { get; set; } = "";
     public string SigningSecret { get; set; } = "";
+
+    // ---- Channel-per-key mode (HitlNodeConfig.SlackChannelKey) ----
+    /// <summary>Channel name = prefix + key (lowercased and sanitised), for example "order-a-1001".</summary>
+    public string ChannelNamePrefix { get; set; } = "order-";
+    public bool PrivateChannels { get; set; }
+    /// <summary>Slack user ids (U...) invited when a channel is created, for example the approvers.</summary>
+    public List<string> InviteUserIds { get; set; } = new();
 }
 
 public sealed class TelegramOptions
