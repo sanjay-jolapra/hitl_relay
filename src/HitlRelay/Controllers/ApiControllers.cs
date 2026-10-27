@@ -84,7 +84,7 @@ public sealed class HitlRequestsController : KeyProtectedController
 public sealed record DemoStartRequest(string Channel, string? Recipient, string Mode = "keyword", string? OrderId = null,
     string? WhatsAppTemplate = null, string? FallbackChannel = null, string? FallbackRecipient = null,
     int? TimeoutMinutes = null, string? OnTimeout = null, string? DefaultValue = null,
-    string? AllowedResponders = null, int? MaxRetries = null);
+    string? AllowedResponders = null, int? MaxRetries = null, List<string>? SlackInviteEmails = null);
 
 public sealed record SimulateReplyRequest(Guid RequestId, string? Key = null, string? Text = null, string? Responder = null);
 

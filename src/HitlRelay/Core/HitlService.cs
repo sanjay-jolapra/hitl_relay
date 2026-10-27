@@ -49,9 +49,17 @@ public sealed class HitlService
 
         // Render the per-key channel setting (e.g. "{{order.id}}") once, on a copy so the caller's config is untouched;
         // the rendered value is what gets stored in ConfigJson and read back by the adapter.
-        if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey) || !string.IsNullOrWhiteSpace(cfg.SlackChannelKey))
+        if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey) || !string.IsNullOrWhiteSpace(cfg.SlackChannelKey) || cfg.SlackInviteEmails.Count > 0)
         {
             cfg = HitlJson.Deserialize<HitlNodeConfig>(HitlJson.Serialize(cfg))!;
+            cfg.SlackInviteEmails = cfg.SlackInviteEmails
+                .Select(e => TemplateRenderer.Render(e, variables).Trim())
+                .Where(e => e.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            foreach (var email in cfg.SlackInviteEmails)
+                if (!EmailShape.IsMatch(email))
+                    throw new ArgumentException($"'{email}' is not a valid e-mail address (SlackInviteEmails).");
             if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey)) cfg.TeamsChannelKey = RenderKey(cfg.TeamsChannelKey, variables, nameof(cfg.TeamsChannelKey));
             if (!string.IsNullOrWhiteSpace(cfg.SlackChannelKey)) cfg.SlackChannelKey = RenderKey(cfg.SlackChannelKey, variables, nameof(cfg.SlackChannelKey));
             if (string.IsNullOrWhiteSpace(cfg.Recipient)) cfg.Recipient = "channel:" + (cfg.TeamsChannelKey ?? cfg.SlackChannelKey);
@@ -148,6 +156,8 @@ public sealed class HitlService
         return req;
     }
 
+    private static readonly System.Text.RegularExpressions.Regex EmailShape = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$");
+
     private static string RenderKey(string template, IReadOnlyDictionary<string, object?>? variables, string setting)
     {
         var key = TemplateRenderer.Render(template, variables).Trim();
@@ -163,6 +173,8 @@ public sealed class HitlService
             throw new ArgumentException("Recipient is required.");
         if (!string.IsNullOrWhiteSpace(cfg.TeamsChannelKey) && !cfg.Channel.Equals(ChannelKeys.Teams, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("TeamsChannelKey is only valid for the Teams channel.");
+        if (cfg.SlackInviteEmails.Count > 0 && !cfg.Channel.Equals(ChannelKeys.Slack, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("SlackInviteEmails is only valid for the Slack channel.");
         if (!string.IsNullOrWhiteSpace(cfg.SlackChannelKey) && !cfg.Channel.Equals(ChannelKeys.Slack, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("SlackChannelKey is only valid for the Slack channel.");
         if (cfg.ResponseMode == HitlResponseMode.Keyword && cfg.AllowedKeywords.Count == 0)

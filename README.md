@@ -106,6 +106,11 @@ Config keys live in `appsettings.json` under `Channels:*`; the template lists ev
    (add `groups:write` and `groups:read` with `PrivateChannels=true`). `InviteUserIds` lists Slack user ids (U...) that are invited
    when a channel is created, so the right people see it. For typed replies in channels subscribe to `message.channels`; buttons
    need nothing extra. A private channel that already exists must have the bot invited by hand.
+   **Inviting teammates by e-mail:** set `SlackInviteEmails` on the node (addresses may use variables such as `{{order.owner.email}}`;
+   in the test console use **+ Add teammate email**). When a channel is *newly created*, each address is looked up in the workspace
+   (`users.lookupByEmail`, needs the `users:read.email` scope) and invited (`conversations.invite`), together with the static
+   `InviteUserIds`. It is best effort: an address that is not in the workspace (for example a guest or an external person) is
+   logged and skipped, and the request is still posted. Existing channels are not re-invited, so people who left stay out.
 6. **Workspaces cannot be auto-created.** Slack has no API to create a workspace (only Enterprise Grid admins can, with an org-level
    admin token, and each new workspace would still need the app installed to get a bot token). Create the workspace once, install the
    app, and use its token; channels are then created automatically.

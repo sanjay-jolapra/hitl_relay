@@ -83,6 +83,13 @@
       </div>
       <label>Allowed responders <span class="muted">(comma separated, optional)</span></label>
       <input id="allowed" placeholder="e.g. tester,boss@example.com" />
+      <div id="slackBox" hidden>
+        <label>Teammates to invite when the Slack channel is created <span class="muted">(by e-mail)</span></label>
+        <div id="emailRows"></div>
+        <button type="button" class="secondary" id="addEmail" style="margin-top:6px">+ Add teammate email</button>
+        <p class="hint">Only used when a new channel is created (leave Recipient blank for a per-order channel, or use a #name).
+          Needs the <code>users:read.email</code> scope; people not in the workspace are skipped.</p>
+      </div>
       <label>WhatsApp template name <span class="muted">(only for whatsapp)</span></label>
       <input id="waTemplate" />
       <div class="actions"><button id="start">Start workflow</button><span id="msg"></span></div>
@@ -221,6 +228,18 @@ el('retryResume').onclick = async () => {
   loadDetail();
 };
 
+function addEmailRow(value = '') {
+  const input = document.createElement('input');
+  input.type = 'email'; input.className = 'inviteEmail'; input.placeholder = 'teammate@company.com'; input.value = value;
+  input.style.marginTop = '4px';
+  el('emailRows').appendChild(input);
+  input.focus();
+}
+el('addEmail').onclick = () => addEmailRow();
+const syncSlackBox = () => { el('slackBox').hidden = el('channel').value !== 'slack'; };
+el('channel').addEventListener('change', syncSlackBox);
+syncSlackBox();
+
 el('start').onclick = async () => {
   el('msg').textContent = 'Starting...';
   try {
@@ -231,6 +250,8 @@ el('start').onclick = async () => {
       fallbackChannel: el('onTimeout').value === 'Escalate' ? el('fbChannel').value : null,
       fallbackRecipient: el('onTimeout').value === 'Escalate' ? el('fbRecipient').value : null,
       whatsAppTemplate: el('waTemplate').value || null,
+      slackInviteEmails: el('channel').value === 'slack'
+        ? [...document.querySelectorAll('.inviteEmail')].map(i => i.value.trim()).filter(Boolean) : null,
     });
     el('msg').textContent = `Started ${res.runId}`;
     await select(res.requestId);

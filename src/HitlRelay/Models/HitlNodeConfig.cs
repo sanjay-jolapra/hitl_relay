@@ -72,4 +72,10 @@ public sealed class HitlNodeConfig
     /// Recipient is then not required.
     /// </summary>
     public string? SlackChannelKey { get; set; }
+
+    /// <summary>
+    /// Slack only. E-mail addresses of teammates (may use workflow variables) who are invited to the channel when it is
+    /// created for this request. Each address is looked up in the workspace (users:read.email) and invited.
+    /// </summary>
+    public List<string> SlackInviteEmails { get; set; } = new();
 }

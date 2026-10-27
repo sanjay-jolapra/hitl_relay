@@ -76,12 +76,12 @@ public sealed class SlackAdapter : IHitlChannelAdapter
         if (!string.IsNullOrWhiteSpace(key))
         {
             cacheKey = SlackChannelProvisioner.CacheKeyFor(key);
-            target = await Provisioner().EnsureChannelAsync(key, ct);
+            target = await Provisioner().EnsureChannelAsync(key, request.Config.SlackInviteEmails, ct);
         }
         else if (!SlackIdPattern.IsMatch(request.Recipient.Trim()))
         {
             cacheKey = SlackChannelProvisioner.NamedCacheKey(request.Recipient);
-            target = await Provisioner().EnsureNamedChannelAsync(request.Recipient, ct);
+            target = await Provisioner().EnsureNamedChannelAsync(request.Recipient, request.Config.SlackInviteEmails, ct);
         }
         else
         {
@@ -107,8 +107,8 @@ public sealed class SlackAdapter : IHitlChannelAdapter
             {
                 await prov.ForgetAsync(cacheKey, ct);
                 target = key != null
-                    ? await prov.EnsureChannelAsync(key, ct)
-                    : await prov.EnsureNamedChannelAsync(request.Recipient, ct);
+                    ? await prov.EnsureChannelAsync(key, request.Config.SlackInviteEmails, ct)
+                    : await prov.EnsureNamedChannelAsync(request.Recipient, request.Config.SlackInviteEmails, ct);
             }
             resp = await CallAsync("chat.postMessage", new { channel = target, payload.text, payload.blocks }, ct);
         }

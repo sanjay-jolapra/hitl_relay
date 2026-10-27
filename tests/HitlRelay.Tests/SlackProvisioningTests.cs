@@ -41,7 +41,7 @@ public class SlackProvisioningTests : IDisposable
 
     public void Dispose() => _h.Dispose();
 
-    private async Task<SendResult> SendAsync(string recipient, string? key = null)
+    private async Task<SendResult> SendAsync(string recipient, string? key = null, params string[] inviteEmails)
     {
         using var scope = _h.Provider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<HitlRelay.Data.HitlDbContext>();
@@ -51,7 +51,7 @@ public class SlackProvisioningTests : IDisposable
         var prov = new SlackChannelProvisioner(http, opts, store, NullLogger<SlackChannelProvisioner>.Instance);
         var adapter = new SlackAdapter(http, opts, _h.Clock, prov);
 
-        var cfg = new HitlNodeConfig { Channel = "slack", Recipient = recipient, SlackChannelKey = key };
+        var cfg = new HitlNodeConfig { Channel = "slack", Recipient = recipient, SlackChannelKey = key, SlackInviteEmails = inviteEmails.ToList() };
         var req = new HitlRequest
         {
             Prompt = "Approve?",
@@ -131,5 +131,68 @@ public class SlackProvisioningTests : IDisposable
 
         Assert.Contains("#approvals", ex.Message);
         Assert.DoesNotContain("conversations.create", _slack.Calls); // an id cannot be created
+    }
+
+    private const string UserLookup = "{\"ok\":true,\"user\":{\"id\":\"U1\"}}";
+
+    [Fact]
+    public async Task NewChannel_InvitesTeammatesByEmail()
+    {
+        _slack.Reply("conversations.create", Created("C111"))
+              .Reply("users.lookupByEmail", "{\"ok\":true,\"user\":{\"id\":\"U1\"}}")
+              .Reply("users.lookupByEmail", "{\"ok\":true,\"user\":{\"id\":\"U2\"}}")
+              .Reply("conversations.invite", "{\"ok\":true}").Reply("conversations.invite", "{\"ok\":true}")
+              .Reply("chat.postMessage", Ok);
+
+        await SendAsync("", "A-7", "a@x.com", "b@x.com");
+
+        Assert.Equal(new[] { "conversations.create", "users.lookupByEmail", "users.lookupByEmail",
+                             "conversations.invite", "conversations.invite", "chat.postMessage" }, _slack.Calls);
+    }
+
+    [Fact]
+    public async Task UnknownEmail_IsSkipped_OthersAreStillInvited_AndTheMessageIsPosted()
+    {
+        _slack.Reply("conversations.create", Created("C111"))
+              .Reply("users.lookupByEmail", "{\"ok\":false,\"error\":\"users_not_found\"}")
+              .Reply("users.lookupByEmail", UserLookup)
+              .Reply("conversations.invite", "{\"ok\":true}")
+              .Reply("chat.postMessage", Ok);
+
+        await SendAsync("", "A-7", "nobody@x.com", "b@x.com");
+
+        Assert.Equal(1, _slack.Calls.Count(c => c == "conversations.invite")); // only the person who was found
+        Assert.Contains("chat.postMessage", _slack.Calls);
+    }
+
+    [Fact]
+    public async Task ExistingChannel_IsNotInvitedAgain()
+    {
+        _slack.Reply("conversations.create", Created("C111")).Reply("chat.postMessage", Ok).Reply("chat.postMessage", Ok)
+              .Reply("users.lookupByEmail", UserLookup).Reply("conversations.invite", "{\"ok\":true}");
+
+        await SendAsync("", "A-7", "a@x.com");   // creates the channel and invites
+        await SendAsync("", "A-7", "a@x.com");   // cached channel: no create, no lookup, no invite
+
+        Assert.Equal(1, _slack.Calls.Count(c => c == "conversations.invite"));
+        Assert.Equal(1, _slack.Calls.Count(c => c == "users.lookupByEmail"));
+    }
+
+    [Fact]
+    public async Task InviteEmailsAreRenderedFromVariablesAndValidated()
+    {
+        var cfg = Harness.KeywordConfig(ChannelKeys.Slack);
+        cfg.Recipient = "";
+        cfg.SlackChannelKey = "{{order.id}}";
+        cfg.SlackInviteEmails = new List<string> { "A@X.com", "a@x.com", "  " };   // duplicates (any case) and blanks collapse
+        var req = await _h.CreateAsync(cfg);
+        Assert.Equal(new[] { "A@X.com" }, req.Config.SlackInviteEmails);
+
+        cfg.SlackInviteEmails = new List<string> { "not-an-email" };
+        await Assert.ThrowsAsync<ArgumentException>(() => _h.CreateAsync(cfg));
+
+        var teams = Harness.KeywordConfig(ChannelKeys.Teams);
+        teams.SlackInviteEmails = new List<string> { "a@x.com" };
+        await Assert.ThrowsAsync<ArgumentException>(() => _h.CreateAsync(teams));
     }
 }

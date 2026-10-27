@@ -34,14 +34,14 @@ public sealed class SlackChannelProvisioner
     }
 
     /// <summary>Returns the Slack channel id for a key (prefix + key becomes the name), creating the channel if needed.</summary>
-    public Task<string> EnsureChannelAsync(string key, CancellationToken ct) =>
-        EnsureAsync(key, ChannelName(_opt.ChannelNamePrefix, key), ct);
+    public Task<string> EnsureChannelAsync(string key, IReadOnlyList<string>? inviteEmails, CancellationToken ct) =>
+        EnsureAsync(key, ChannelName(_opt.ChannelNamePrefix, key), inviteEmails, ct);
 
     /// <summary>Same, for a channel the node names directly (for example "#approvals"): no prefix is added.</summary>
-    public Task<string> EnsureNamedChannelAsync(string name, CancellationToken ct)
+    public Task<string> EnsureNamedChannelAsync(string name, IReadOnlyList<string>? inviteEmails, CancellationToken ct)
     {
         var clean = ChannelName("", name.TrimStart('#'));
-        return EnsureAsync("name:" + clean, clean, ct);
+        return EnsureAsync("name:" + clean, clean, inviteEmails, ct);
     }
 
     /// <summary>Drops the cached id so the next Ensure looks the channel up again, or creates it (deleted/archived channel).</summary>
@@ -50,7 +50,7 @@ public sealed class SlackChannelProvisioner
     public static string CacheKeyFor(string key) => key;
     public static string NamedCacheKey(string name) => "name:" + ChannelName("", name.TrimStart('#'));
 
-    private async Task<string> EnsureAsync(string cacheKey, string name, CancellationToken ct)
+    private async Task<string> EnsureAsync(string cacheKey, string name, IReadOnlyList<string>? inviteEmails, CancellationToken ct)
     {
         var cached = await _store.GetAsync(MappingChannel, cacheKey, ct);
         if (cached != null) return cached;
@@ -66,7 +66,7 @@ public sealed class SlackChannelProvisioner
             if (created != null)
             {
                 id = created;
-                await InviteAsync(id, ct); // only on creation, so people who left are not re-added later
+                await InviteAsync(id, inviteEmails, ct); // only on creation, so people who left are not re-added later
                 _log.LogInformation("Slack channel #{Name} created", name);
             }
             else
@@ -109,13 +109,27 @@ public sealed class SlackChannelProvisioner
         throw new HttpRequestException($"Slack conversations.create failed: {error}");
     }
 
-    private async Task InviteAsync(string channelId, CancellationToken ct)
+    /// <summary>
+    /// Invites the configured user ids plus the teammates named by e-mail to a newly created channel. Best effort: the
+    /// channel already exists and the request can still be posted, so problems are logged, not thrown. Each person is invited
+    /// with their own call, so one unknown address does not stop the others.
+    /// </summary>
+    private async Task InviteAsync(string channelId, IReadOnlyList<string>? emails, CancellationToken ct)
     {
-        if (_opt.InviteUserIds.Count == 0) return;
-        var (ok, error, _) = await PostAsync("conversations.invite", new { channel = channelId, users = string.Join(',', _opt.InviteUserIds) }, ct);
-        // Inviting is best effort: the channel exists and the request can still be posted.
-        if (!ok && error != "already_in_channel")
-            _log.LogWarning("Inviting users to Slack channel {Channel} failed: {Error}", channelId, error);
+        var userIds = new List<string>(_opt.InviteUserIds);
+        foreach (var email in emails ?? Array.Empty<string>())
+        {
+            var (ok, error, root) = await GetAsync($"users.lookupByEmail?email={Uri.EscapeDataString(email)}", ct);
+            if (ok) userIds.Add(root.GetProperty("user").GetProperty("id").GetString()!);
+            else _log.LogWarning("Slack user for {Email} not found ({Error}); not invited. Needs the users:read.email scope, and the person must be in the workspace.", Mask.Value(email), error);
+        }
+
+        foreach (var userId in userIds.Distinct())
+        {
+            var (ok, error, _) = await PostAsync("conversations.invite", new { channel = channelId, users = userId }, ct);
+            if (!ok && error is not ("already_in_channel" or "cant_invite_self"))
+                _log.LogWarning("Inviting {User} to Slack channel {Channel} failed: {Error}", userId, channelId, error);
+        }
     }
 
     /// <summary>Joins a public channel (no-op for private channels: a bot cannot join those itself).</summary>

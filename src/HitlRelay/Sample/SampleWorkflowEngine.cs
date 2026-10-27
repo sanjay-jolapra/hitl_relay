@@ -69,6 +69,8 @@ public sealed class SampleWorkflowEngine : IWorkflowResumer
         };
 
         // Optional test-console overrides.
+        if (start.SlackInviteEmails is { Count: > 0 } && start.Channel.Equals("slack", StringComparison.OrdinalIgnoreCase))
+            cfg.SlackInviteEmails = start.SlackInviteEmails;
         if (start.TimeoutMinutes is int tm) cfg.Timeout = TimeSpan.FromMinutes(tm);
         if (Enum.TryParse<HitlTimeoutAction>(start.OnTimeout, true, out var action)) cfg.OnTimeout = action;
         if (!string.IsNullOrEmpty(start.DefaultValue)) cfg.DefaultValue = start.DefaultValue;
