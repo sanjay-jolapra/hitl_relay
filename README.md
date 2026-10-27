@@ -100,7 +100,9 @@ Config keys live in `appsettings.json` under `Channels:*`; the template lists ev
 5. **Channel per order:** set `SlackChannelKey` on the node (for example `{{order.id}}`) and leave Recipient empty. The app finds or
    creates a channel named `ChannelNamePrefix + key` (for example `order-a-1001`, lowercased and sanitised, max 80 characters) in the
    workspace the bot token belongs to, and posts each request as its own new top-level message (thread) there. If the channel
-   already exists it is reused (the bot joins it if needed). Extra bot scopes: `channels:manage`, `channels:join`, `channels:read`
+   already exists it is reused (the bot joins it if needed). Giving a channel **name** as the Recipient (for example `#approvals`) works the same way: it is created if missing instead of failing with
+   `channel_not_found`. If a cached channel was deleted or archived in Slack, it is recreated and the message retried. Only a raw Slack
+   id (`C0123...`) is posted to as-is, because an id that does not exist cannot be created. Extra bot scopes: `channels:manage`, `channels:join`, `channels:read`
    (add `groups:write` and `groups:read` with `PrivateChannels=true`). `InviteUserIds` lists Slack user ids (U...) that are invited
    when a channel is created, so the right people see it. For typed replies in channels subscribe to `message.channels`; buttons
    need nothing extra. A private channel that already exists must have the bot invited by hand.

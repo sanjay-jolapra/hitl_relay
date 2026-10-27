@@ -33,36 +33,53 @@ public sealed class SlackChannelProvisioner
         _log = log;
     }
 
-    /// <summary>Returns the Slack channel id (C... or G...) for the key, creating the channel if it does not exist.</summary>
-    public async Task<string> EnsureChannelAsync(string key, CancellationToken ct)
+    /// <summary>Returns the Slack channel id for a key (prefix + key becomes the name), creating the channel if needed.</summary>
+    public Task<string> EnsureChannelAsync(string key, CancellationToken ct) =>
+        EnsureAsync(key, ChannelName(_opt.ChannelNamePrefix, key), ct);
+
+    /// <summary>Same, for a channel the node names directly (for example "#approvals"): no prefix is added.</summary>
+    public Task<string> EnsureNamedChannelAsync(string name, CancellationToken ct)
     {
-        var cached = await _store.GetAsync(MappingChannel, key, ct);
+        var clean = ChannelName("", name.TrimStart('#'));
+        return EnsureAsync("name:" + clean, clean, ct);
+    }
+
+    /// <summary>Drops the cached id so the next Ensure looks the channel up again, or creates it (deleted/archived channel).</summary>
+    public Task ForgetAsync(string cacheKey, CancellationToken ct) => _store.DeleteAsync(MappingChannel, cacheKey, ct);
+
+    public static string CacheKeyFor(string key) => key;
+    public static string NamedCacheKey(string name) => "name:" + ChannelName("", name.TrimStart('#'));
+
+    private async Task<string> EnsureAsync(string cacheKey, string name, CancellationToken ct)
+    {
+        var cached = await _store.GetAsync(MappingChannel, cacheKey, ct);
         if (cached != null) return cached;
 
         await CreateLock.WaitAsync(ct);
         try
         {
-            cached = await _store.GetAsync(MappingChannel, key, ct);
+            cached = await _store.GetAsync(MappingChannel, cacheKey, ct); // another caller may have created it meanwhile
             if (cached != null) return cached;
 
-            var name = ChannelName(_opt.ChannelNamePrefix, key);
             string id;
             var created = await TryCreateAsync(name, ct);
             if (created != null)
             {
                 id = created;
                 await InviteAsync(id, ct); // only on creation, so people who left are not re-added later
-                _log.LogInformation("Slack channel #{Name} created for key {Key}", name, key);
+                _log.LogInformation("Slack channel #{Name} created", name);
             }
             else
             {
-                id = await FindByNameAsync(name, ct)
-                     ?? throw new HttpRequestException($"Slack channel #{name} exists but could not be found (is it archived, or is a read scope missing?).");
-                await JoinIfNeededAsync(id, ct);
-                _log.LogInformation("Slack channel #{Name} already existed; reusing it for key {Key}", name, key);
+                var (foundId, archived) = await FindByNameAsync(name, ct)
+                    ?? throw new HttpRequestException($"Slack channel #{name} exists but could not be found (is a read scope missing, or is it a private channel the bot is not in?).");
+                if (archived) await UnarchiveAsync(foundId, name, ct);
+                id = foundId;
+                await JoinAsync(id, ct);
+                _log.LogInformation("Slack channel #{Name} already existed; reusing it", name);
             }
 
-            await _store.SaveAsync(MappingChannel, key, id, ct);
+            await _store.SaveAsync(MappingChannel, cacheKey, id, ct);
             return id;
         }
         finally
@@ -101,26 +118,39 @@ public sealed class SlackChannelProvisioner
             _log.LogWarning("Inviting users to Slack channel {Channel} failed: {Error}", channelId, error);
     }
 
-    private async Task JoinIfNeededAsync(string channelId, CancellationToken ct)
+    /// <summary>Joins a public channel (no-op for private channels: a bot cannot join those itself).</summary>
+    public async Task JoinAsync(string channelId, CancellationToken ct)
     {
-        if (_opt.PrivateChannels) return; // a bot cannot join private channels itself; someone must invite it
+        if (_opt.PrivateChannels) return;
         var (ok, error, _) = await PostAsync("conversations.join", new { channel = channelId }, ct);
         if (!ok) _log.LogWarning("Joining Slack channel {Channel} failed: {Error} (needs channels:join)", channelId, error);
     }
 
-    private async Task<string?> FindByNameAsync(string name, CancellationToken ct)
+    private async Task UnarchiveAsync(string channelId, string name, CancellationToken ct)
+    {
+        var (ok, error, _) = await PostAsync("conversations.unarchive", new { channel = channelId }, ct);
+        if (!ok)
+            throw new HitlRecipientUnreachableException(
+                $"Slack channel #{name} is archived and could not be restored automatically ({error}). Unarchive it, or use a different key.");
+    }
+
+    private async Task<(string id, bool archived)?> FindByNameAsync(string name, CancellationToken ct)
     {
         var types = _opt.PrivateChannels ? "public_channel,private_channel" : "public_channel";
         string? cursor = null;
         do
         {
-            var url = $"conversations.list?exclude_archived=true&limit=200&types={types}" +
+            var url = $"conversations.list?exclude_archived=false&limit=200&types={types}" +
                       (cursor == null ? "" : "&cursor=" + Uri.EscapeDataString(cursor));
             var (ok, error, root) = await GetAsync(url, ct);
             if (!ok) throw new HttpRequestException($"Slack conversations.list failed: {error}");
 
             foreach (var ch in root.GetProperty("channels").EnumerateArray())
-                if (ch.GetProperty("name").GetString() == name) return ch.GetProperty("id").GetString();
+            {
+                if (ch.GetProperty("name").GetString() != name) continue;
+                var archived = ch.TryGetProperty("is_archived", out var ia) && ia.GetBoolean();
+                return (ch.GetProperty("id").GetString()!, archived);
+            }
 
             cursor = root.TryGetProperty("response_metadata", out var meta) && meta.TryGetProperty("next_cursor", out var c)
                 ? c.GetString() : null;

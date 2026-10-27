@@ -49,6 +49,15 @@ public sealed class ChannelConnectionStore
         }
     }
 
+    /// <summary>Removes a stored value (for example a cached channel id that turned out to be stale).</summary>
+    public async Task DeleteAsync(string channel, string key, CancellationToken ct = default)
+    {
+        var row = await _db.ChannelConnections.FirstOrDefaultAsync(c => c.Channel == channel && c.Key == key, ct);
+        if (row == null) return;
+        _db.ChannelConnections.Remove(row);
+        await _db.SaveChangesAsync(ct);
+    }
+
     public async Task<string?> GetAsync(string channel, string key, CancellationToken ct = default)
     {
         var row = await _db.ChannelConnections.AsNoTracking()

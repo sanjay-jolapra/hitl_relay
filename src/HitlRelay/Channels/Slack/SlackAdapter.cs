@@ -39,6 +39,12 @@ public sealed class SlackAdapter : IHitlChannelAdapter
 
     public string ChannelKey => ChannelKeys.Slack;
 
+    // Slack ids: channels C..., private channels/groups G..., DMs D..., users U..., enterprise users W...
+    private static readonly System.Text.RegularExpressions.Regex SlackIdPattern = new(@"^[CGDUW][A-Z0-9]{8,}$");
+
+    private SlackChannelProvisioner Provisioner() =>
+        _channels ?? throw new InvalidOperationException("Slack channel provisioning is not configured.");
+
     public async Task<SendResult> SendAsync(HitlRequest request, CancellationToken ct)
     {
         var blocks = new List<object> { Section(request.Prompt) };
@@ -62,14 +68,56 @@ public sealed class SlackAdapter : IHitlChannelAdapter
             blocks.Add(new { type = "context", elements = new[] { new { type = "mrkdwn", text = "_Reply in this thread to answer._" } } });
         }
 
-        // Channel-per-key mode: find or create the channel, then post a NEW top-level message (its own thread) in it.
-        var target = request.Recipient;
+        // Where to post. Channel-per-key mode and channel *names* (e.g. "#approvals") are provisioned: the channel is found
+        // or created. A raw Slack id (C.../G.../D.../U...) is posted to as-is, since an id that does not exist cannot be created.
         var key = request.Config.SlackChannelKey;
+        string? cacheKey = null;
+        string target;
         if (!string.IsNullOrWhiteSpace(key))
-            target = await (_channels ?? throw new InvalidOperationException("Slack channel provisioning is not configured."))
-                .EnsureChannelAsync(key, ct);
+        {
+            cacheKey = SlackChannelProvisioner.CacheKeyFor(key);
+            target = await Provisioner().EnsureChannelAsync(key, ct);
+        }
+        else if (!SlackIdPattern.IsMatch(request.Recipient.Trim()))
+        {
+            cacheKey = SlackChannelProvisioner.NamedCacheKey(request.Recipient);
+            target = await Provisioner().EnsureNamedChannelAsync(request.Recipient, ct);
+        }
+        else
+        {
+            target = request.Recipient.Trim();
+        }
 
-        var resp = await CallAsync("chat.postMessage", new { channel = target, text = request.Prompt, blocks }, ct);
+        var payload = new { text = request.Prompt, blocks };
+        JsonElement resp;
+        try
+        {
+            resp = await CallAsync("chat.postMessage", new { channel = target, payload.text, payload.blocks }, ct);
+        }
+        catch (SlackApiException ex) when (cacheKey != null && ex.Error is "channel_not_found" or "is_archived" or "not_in_channel")
+        {
+            // The cached channel id is stale (deleted/archived) or the bot left it: forget it, then find or create the
+            // channel again and retry once, instead of failing the request.
+            var prov = Provisioner();
+            if (ex.Error == "not_in_channel")
+            {
+                await prov.JoinAsync(target, ct);
+            }
+            else
+            {
+                await prov.ForgetAsync(cacheKey, ct);
+                target = key != null
+                    ? await prov.EnsureChannelAsync(key, ct)
+                    : await prov.EnsureNamedChannelAsync(request.Recipient, ct);
+            }
+            resp = await CallAsync("chat.postMessage", new { channel = target, payload.text, payload.blocks }, ct);
+        }
+        catch (SlackApiException ex) when (UnreachableErrors.Contains(ex.Error))
+        {
+            throw new HitlRecipientUnreachableException(
+                $"Slack recipient '{request.Recipient}' is not reachable ({ex.Error}). " +
+                "To have a channel created automatically use a channel name such as #approvals or SlackChannelKey instead of a Slack id.", ex);
+        }
         var ts = resp.GetProperty("ts").GetString();
         var channel = resp.GetProperty("channel").GetString();
         return new SendResult(ts, ts, channel);
@@ -194,8 +242,14 @@ public sealed class SlackAdapter : IHitlChannelAdapter
         if (root.TryGetProperty("ok", out var ok) && ok.GetBoolean()) return root;
 
         var error = root.TryGetProperty("error", out var e) ? e.GetString() ?? "unknown_error" : "unknown_error";
-        if (method == "chat.postMessage" && UnreachableErrors.Contains(error))
-            throw new HitlRecipientUnreachableException($"Slack recipient is not reachable: {error}");
-        throw new HttpRequestException($"Slack {method} failed: {error}");
+        throw new SlackApiException(method, error);
     }
+}
+
+/// <summary>A Slack Web API call that returned ok=false; Error is Slack's error code (for example channel_not_found).</summary>
+public sealed class SlackApiException : HttpRequestException
+{
+    public string Error { get; }
+
+    public SlackApiException(string method, string error) : base($"Slack {method} failed: {error}") => Error = error;
 }
